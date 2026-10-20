@@ -1,0 +1,68 @@
+{
+  "name": "lan-share",
+  "version": "0.2.0",
+  "description": "Browse and copy files between PCs on the same Wi-Fi/LAN",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -p . && tsc -p src/renderer",
+    "start": "npm run build && electron .",
+    "watch": "tsc -p . -w",
+    "test": "npm run build && electron test/e2e.js",
+    "icon": "electron scripts/make-icon.js",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "author": "Venky",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/qrcode": "^1.5.6",
+    "electron": "^44.9.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "selfsigned": "^5.5.0"
+  },
+  "productName": "LAN Share",
+  "private": true,
+  "build": {
+    "appId": "com.venky.lanshare",
+    "productName": "LAN Share",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/main/**/*.js",
+      "dist/preload/**/*.js",
+      "dist/shared/**/*.js",
+      "dist/web/**/*.js",
+      "static/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LAN Share",
+      "include": "build/installer.nsh",
+      "runAfterFinish": true,
+      "artifactName": "LAN-Share-Setup-${version}.exe"
+    }
+  }
+}

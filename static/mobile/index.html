@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f6fed">
+  <title>LAN Share</title>
+  <link rel="icon" href="/m/icon.png">
+  <link rel="apple-touch-icon" href="/m/icon.png">
+  <link rel="stylesheet" href="/m/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <img src="/m/icon.png" alt="" class="logo">
+    <div class="titles">
+      <div class="title" id="pc-name">LAN Share</div>
+      <div class="subtitle" id="subtitle">Connecting…</div>
+    </div>
+    <button id="logout" class="link-btn" hidden>Log out</button>
+  </header>
+
+  <main id="view"></main>
+
+  <section id="uploads" class="uploads" hidden></section>
+
+  <input id="file-input" type="file" multiple hidden>
+  <div id="toast" class="toast" hidden></div>
+  <script src="/m/app.js"></script>
+</body>
+</html>

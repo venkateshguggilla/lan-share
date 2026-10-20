@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAN Share</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span>LAN Share</span>
+        <button id="settings-btn" class="icon-btn" title="Settings"></button>
+      </div>
+      <div id="this-pc" class="this-pc"></div>
+      <div id="net-warning"></div>
+      <div class="section-title">Devices on network</div>
+      <ul id="device-list" class="device-list"></ul>
+      <button id="phone-btn" class="btn full">Connect a phone</button>
+      <button id="manual-btn" class="btn ghost full">Connect by IP address</button>
+    </aside>
+
+    <main id="main">
+      <div id="panes">
+        <section class="pane" id="local-pane"></section>
+        <div class="pane-actions">
+          <button id="send-btn" class="btn primary" title="Send selected files to the remote PC">Send &rarr;</button>
+          <button id="fetch-btn" class="btn primary" title="Copy selected files to this PC">&larr; Copy here</button>
+        </div>
+        <section class="pane" id="remote-pane"></section>
+      </div>
+      <section id="transfers" class="transfers"></section>
+    </main>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toasts"></div>
+  <script type="module" src="../dist/web/renderer/app.js"></script>
+</body>
+</html>
