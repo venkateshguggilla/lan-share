@@ -1,7 +1,7 @@
 // Renderer: device list, two-pane explorer, transfers and dialogs. Plain DOM, no framework.
 import type { Api } from '../shared/api';
 import type {
-  AppInfo, Device, FileEntry, IncomingSession, RemoteItem, RemoteRoot, Settings, SharedFolder, Transfer,
+  AppInfo, Device, FileEntry, NetworkFix, IncomingSession, RemoteItem, RemoteRoot, Settings, SharedFolder, Transfer,
 } from '../shared/types';
 
 const api = (window as unknown as { api: Api }).api;
@@ -224,41 +224,98 @@ function renderThisPc(): void {
 }
 
 function renderNetworkWarning(): void {
-  const nets = state.info?.publicNetworks ?? [];
+  const issue = state.info?.networkIssue;
   const el = $('net-warning');
-  if (!nets.length) {
+  if (!issue) {
     el.replaceChildren();
     return;
   }
-  const names = nets.map((n) => `"${n.name}"`).join(', ');
+  const names = issue.networks.map((n) => `"${n}"`).join(', ');
+  let text: string;
+  if (issue.os === 'windows') text = `Your network ${names} is set to Public, so Windows Firewall blocks LAN Share.`;
+  else if (issue.kind === 'public') text = `RudramOS treats ${names} as a Public network and blocks every incoming connection.`;
+  else text = 'RudramOS keeps sharing closed until you allow it. LAN Share is not allowed yet.';
   el.replaceChildren(
     h('div', { class: 'warning-card', role: 'alert' },
-      h('div', { class: 'warning-title' }, svg(ICONS.warning), "Other PCs can't connect"),
-      h('div', {}, `Your network ${names} is set to Public, so Windows Firewall blocks LAN Share.`),
+      h('div', { class: 'warning-title' }, svg(ICONS.warning), "Other devices can't connect"),
+      h('div', {}, text),
       h('button', { class: 'btn small', onclick: networkHelpDialog }, 'How to fix'),
     ),
   );
 }
 
 function networkHelpDialog(): void {
-  const nets = state.info?.publicNetworks ?? [];
-  const name = nets[0]?.name ?? 'your network';
-  modal((close) => [
-    h('h2', {}, 'Set your network to Private'),
-    h('p', { class: 'lead' },
-      `Windows treats "${name}" as a public network (like café Wi-Fi) and blocks incoming connections. ` +
-      'Change it to Private if this is your home or office network that you trust.'),
-    h('ol', { class: 'steps' },
-      h('li', {}, 'Click Open network settings below.'),
-      h('li', {}, `Click Properties under "${name}" (or click the network name).`),
-      h('li', {}, 'Under Network profile type, choose Private network.'),
-    ),
-    h('p', { class: 'hint' }, 'Do this on every PC you want to connect. This warning disappears by itself once the change is made.'),
-    h('div', { class: 'modal-actions' },
-      h('button', { class: 'btn', onclick: close }, 'Close'),
-      h('button', { class: 'btn primary', onclick: () => api.openNetworkSettings() }, 'Open network settings'),
-    ),
-  ]);
+  const issue = state.info?.networkIssue;
+  if (!issue) return;
+  const name = issue.networks[0] ?? 'your network';
+  const err = h('div', { class: 'error-text' });
+
+  // Runs the fix; on RudramOS this shows the admin approval prompt.
+  const fixButton = (label: string, fix: NetworkFix, close: () => void) => {
+    const btn = h('button', { class: 'btn primary' }, label);
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      err.textContent = '';
+      const res = await api.fixNetwork(fix);
+      btn.disabled = false;
+      if (!res.ok) err.textContent = res.error ?? 'That did not work';
+      else if (fix !== 'windows-settings') {
+        state.info = await api.getInfo();
+        renderThisPc();
+        renderNetworkWarning();
+        close();
+        if (state.info.networkIssue) networkHelpDialog(); // Next step (e.g. allow LAN Share after trusting).
+        else toast('Other devices can now connect to this PC');
+      }
+    });
+    return btn;
+  };
+
+  if (issue.os === 'windows') {
+    modal((close) => [
+      h('h2', {}, 'Set your network to Private'),
+      h('p', { class: 'lead' },
+        `Windows treats "${name}" as a public network (like café Wi-Fi) and blocks incoming connections. ` +
+        'Change it to Private if this is your home or office network that you trust.'),
+      h('ol', { class: 'steps' },
+        h('li', {}, 'Click Open network settings below.'),
+        h('li', {}, `Click Properties under "${name}" (or click the network name).`),
+        h('li', {}, 'Under Network profile type, choose Private network.'),
+      ),
+      h('p', { class: 'hint' }, 'Do this on every PC you want to connect. This warning disappears by itself once the change is made.'),
+      err,
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn', onclick: close }, 'Close'),
+        fixButton('Open network settings', 'windows-settings', close)),
+    ]);
+  } else if (issue.kind === 'public') {
+    modal((close) => [
+      h('h2', {}, 'Mark this network as Home'),
+      h('p', { class: 'lead' },
+        `RudramOS treats "${name}" as Public: nothing on it can reach this PC, and LAN Share stays hidden. ` +
+        'Mark it as Home only if it is your home or office network that you trust.'),
+      h('p', { class: 'hint' },
+        'RudramOS asks for an admin password. After that, LAN Share also needs to be allowed on Home networks (next step). ' +
+        'Other networks stay Public, so LAN Share closes automatically when you take this PC elsewhere.'),
+      err,
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn', onclick: close }, 'Not now'),
+        fixButton(`Mark "${name}" as Home`, 'rudramos-trust', close)),
+    ]);
+  } else {
+    modal((close) => [
+      h('h2', {}, 'Allow LAN Share on Home networks'),
+      h('p', { class: 'lead' },
+        'RudramOS blocks incoming connections even on Home networks until you allow each kind of sharing. ' +
+        'Allowing LAN Share lets other PCs and phones on your Home networks find this PC and ask for its password.'),
+      h('p', { class: 'hint' },
+        'RudramOS asks for an admin password. You can turn it off again in Control Center → Network → Sharing on Home networks.'),
+      err,
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn', onclick: close }, 'Not now'),
+        fixButton('Allow LAN Share', 'rudramos-share', close)),
+    ]);
+  }
 }
 
 function renderDevices(): void {
@@ -266,7 +323,8 @@ function renderDevices(): void {
   if (!state.devices.length) {
     list.replaceChildren(
       h('li', { class: 'empty-devices' },
-        'Looking for other PCs running LAN Share… Make sure they are on the same Wi-Fi/LAN and that Windows Firewall allows LAN Share on private networks.'),
+        'Looking for other PCs running LAN Share… Make sure they are on the same Wi-Fi/LAN and that their firewall lets LAN Share in ' +
+        '(Private network on Windows; Home network with LAN Share allowed on RudramOS).'),
     );
     return;
   }
@@ -791,8 +849,8 @@ async function phoneDialog(): Promise<void> {
                 ...links.map((l, i) => h('option', { value: String(i) }, `${l.interfaceName} (${l.url.split('/')[2].split(':')[0]})`)))
             : null,
         ),
-    (info?.publicNetworks.length ?? 0) > 0
-      ? h('p', { class: 'error-text' }, 'Your network is set to Public, so the phone will not be able to connect. See the warning in the sidebar.')
+    info?.networkIssue
+      ? h('p', { class: 'error-text' }, 'The phone will not be able to connect until you fix the network warning in the sidebar.')
       : null,
     problem ? null : h('ol', { class: 'steps' },
       h('li', {}, 'Connect the phone to the same Wi-Fi as this PC.'),

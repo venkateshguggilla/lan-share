@@ -28,7 +28,7 @@ export interface AppInfo {
   port: number | null;
   serverRunning: boolean;
   hasPassword: boolean;
-  publicNetworks: PublicNetwork[];
+  networkIssue: NetworkIssue | null;
 }
 
 export interface PhoneLink {
@@ -37,10 +37,15 @@ export interface PhoneLink {
   qrDataUrl: string;
 }
 
-export interface PublicNetwork {
-  name: string;
-  interfaceAlias: string;
+/** Why other devices can't reach this PC, if they can't. */
+export interface NetworkIssue {
+  os: 'windows' | 'rudramos';
+  // public: the network is Public. sharing-off: RudramOS Home network, but LAN Share isn't allowed.
+  kind: 'public' | 'sharing-off';
+  networks: string[];
 }
+
+export type NetworkFix = 'windows-settings' | 'rudramos-trust' | 'rudramos-share';
 
 export interface Device {
   id: string;

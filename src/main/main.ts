@@ -10,9 +10,10 @@ import { Discovery, lanInterfaces } from './discovery';
 import { RemoteClient, friendlyError } from './client';
 import { TransferManager } from './transfers';
 import { listDir, listDrives } from './files';
-import { publicNetworks } from './netprofile';
+import { PCOS_NETWORK, RUDRAMOS_SERVICE, isRudramOS, networkIssue } from './netprofile';
+import { execFile } from 'child_process';
 import * as QRCode from 'qrcode';
-import type { AppInfo, Device, PhoneLink, PublicNetwork, Settings, SettingsUpdate } from '../shared/types';
+import type { AppInfo, Device, NetworkFix, NetworkIssue, PhoneLink, Settings, SettingsUpdate } from '../shared/types';
 
 // LANSHARE_PROFILE lets you run a second copy on one PC for testing (separate settings).
 const profile = process.env.LANSHARE_PROFILE;
@@ -24,7 +25,8 @@ const server = new FileServer();
 let discovery: Discovery;
 let client: RemoteClient;
 let transfers: TransferManager;
-let publicNets: PublicNetwork[] = [];
+let netIssue: NetworkIssue | null = null;
+let networkChecked = false;
 
 function send(channel: string, ...args: unknown[]): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args);
@@ -50,12 +52,15 @@ function info(): AppInfo {
     port: server.port,
     serverRunning: server.running,
     hasPassword: !!cfg.passwordHash,
-    publicNetworks: publicNets,
+    networkIssue: netIssue,
   };
 }
 
 // Virtual adapters (WSL, Hyper-V, VPNs) whose addresses a phone on the Wi-Fi can't reach.
-const VIRTUAL_ADAPTER = /vEthernet|WSL|Hyper-V|VirtualBox|VMware|Tailscale|ZeroTier|Hamachi|Bluetooth|Loopback|docker|VPN/i;
+// Windows adapter names, then Linux interface names (virbr, veth, podman, tun, wg...).
+const VIRTUAL_ADAPTER =
+  /vEthernet|WSL|Hyper-V|VirtualBox|VMware|Tailscale|ZeroTier|Hamachi|Bluetooth|Loopback|docker|VPN|^(lo|virbr|veth|br-|podman|cni|flannel|tun|tap|wg|zt)/i;
+const WIFI_ADAPTER = /wi-?fi|wlan|wireless|^wl/i;
 
 /** Addresses a phone on the same network can open, best first, each with a QR code. */
 async function phoneLinks(): Promise<PhoneLink[]> {
@@ -67,7 +72,7 @@ async function phoneLinks(): Promise<PhoneLink[]> {
     }
   }
   const real = all.filter((a) => !VIRTUAL_ADAPTER.test(a.name));
-  const ranked = [...real.filter((a) => /wi-?fi|wlan|wireless/i.test(a.name)), ...real.filter((a) => !/wi-?fi|wlan|wireless/i.test(a.name))];
+  const ranked = [...real.filter((a) => WIFI_ADAPTER.test(a.name)), ...real.filter((a) => !WIFI_ADAPTER.test(a.name))];
   const chosen = ranked.length ? ranked : all;
   return Promise.all(
     chosen.map(async (a) => {
@@ -77,12 +82,41 @@ async function phoneLinks(): Promise<PhoneLink[]> {
   );
 }
 
-/** Re-checks whether any network is set to Public and tells the UI when that changes. */
-async function checkNetworkProfiles(): Promise<void> {
-  const nets = await publicNetworks();
-  if (JSON.stringify(nets) === JSON.stringify(publicNets)) return;
-  publicNets = nets;
+/** Re-checks whether the network lets other devices in, and tells the UI when that changes. */
+async function checkNetwork(): Promise<void> {
+  const issue = await networkIssue();
+  const firstCheck = !networkChecked;
+  networkChecked = true;
+  if (!firstCheck && JSON.stringify(issue) === JSON.stringify(netIssue)) return;
+  const wasHidden = isRudramOS() && (firstCheck || netIssue !== null);
+  netIssue = issue;
   send('info', info());
+  if (wasHidden && !issue) discovery.sendHello(); // RudramOS: announce right away once reachable.
+}
+
+/** Runs pcos-network through pkexec, so RudramOS asks for admin approval like Control Center does. */
+function pcosNetwork(args: string[]): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    execFile('pkexec', [PCOS_NETWORK, ...args], { timeout: 5 * 60 * 1000 }, (err, _out, stderr) => {
+      if (!err) return resolve({ ok: true });
+      const code = (err as { code?: number | string }).code; // Exit code: 126 dismissed, 127 not authorized.
+      if (code === 126 || code === 127) return resolve({ ok: false, error: 'Admin approval was cancelled or denied' });
+      resolve({ ok: false, error: String(stderr).trim() || err.message });
+    });
+  });
+}
+
+async function fixNetwork(fix: NetworkFix): Promise<{ ok: boolean; error?: string }> {
+  let result: { ok: boolean; error?: string } = { ok: true };
+  if (fix === 'windows-settings') await shell.openExternal('ms-settings:network-status');
+  else if (fix === 'rudramos-share') result = await pcosNetwork(['share', RUDRAMOS_SERVICE, 'on']);
+  else if (fix === 'rudramos-trust') {
+    const network = netIssue?.kind === 'public' ? netIssue.networks[0] : undefined;
+    if (!network) return { ok: false, error: 'No Public network to change' };
+    result = await pcosNetwork(['trust', network, 'home']);
+  }
+  await checkNetwork();
+  return result;
 }
 
 function devices(): Device[] {
@@ -138,7 +172,7 @@ function createWindow(): void {
 function registerIpc(): void {
   ipcMain.handle('getInfo', () => info());
   ipcMain.handle('phoneLinks', () => phoneLinks());
-  ipcMain.handle('openNetworkSettings', () => shell.openExternal('ms-settings:network-status'));
+  ipcMain.handle('fixNetwork', (_e, fix: NetworkFix) => fixNetwork(fix));
   ipcMain.handle('getSettings', () => settings());
 
   ipcMain.handle('saveSettings', async (_e, update: SettingsUpdate) => {
@@ -229,6 +263,8 @@ app.whenReady().then(async () => {
   discovery = new Discovery(getConfig().deviceId, () => {
     const cfg = getConfig();
     if (!cfg.allowConnections || !server.port) return null;
+    // RudramOS stealth mode: stay silent unless this network is Home and LAN Share is allowed on it.
+    if (isRudramOS() && (!networkChecked || netIssue)) return null;
     return { id: cfg.deviceId, name: cfg.deviceName, port: server.port, platform: process.platform };
   });
   client = new RemoteClient((id) => {
@@ -252,8 +288,8 @@ app.whenReady().then(async () => {
 
   registerIpc();
   createWindow();
-  checkNetworkProfiles();
-  setInterval(checkNetworkProfiles, 10000);
+  checkNetwork();
+  setInterval(checkNetwork, 10000);
   discovery.start();
   try {
     await applyServerState();

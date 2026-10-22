@@ -1,12 +1,12 @@
 // The API exposed to the renderer by the preload script (window.api).
 import type {
-  AppInfo, ConnectResult, PhoneLink, Device, IncomingSession, ListResult, RemoteItem,
+  AppInfo, ConnectResult, NetworkFix, PhoneLink, Device, IncomingSession, ListResult, RemoteItem,
   RemoteRoot, Settings, SettingsUpdate, Transfer,
 } from './types';
 
 export interface Api {
   getInfo(): Promise<AppInfo>;
-  openNetworkSettings(): Promise<void>;
+  fixNetwork(fix: NetworkFix): Promise<{ ok: boolean; error?: string }>;
   phoneLinks(): Promise<PhoneLink[]>;
 
   getSettings(): Promise<Settings>;

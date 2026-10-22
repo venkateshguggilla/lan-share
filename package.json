@@ -7,9 +7,10 @@
     "build": "tsc -p . && tsc -p src/renderer",
     "start": "npm run build && electron .",
     "watch": "tsc -p . -w",
-    "test": "npm run build && electron test/e2e.js",
+    "test": "npm run build && node test/netprofile.test.js && electron test/e2e.js",
     "icon": "electron scripts/make-icon.js",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux dir --x64 --publish never"
   },
   "author": "Venky",
   "license": "UNLICENSED",
@@ -63,6 +64,15 @@
       "include": "build/installer.nsh",
       "runAfterFinish": true,
       "artifactName": "LAN-Share-Setup-${version}.exe"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "executableName": "lan-share",
+      "icon": "build/icon.png",
+      "category": "Network",
+      "synopsis": "Share files between PCs and phones on your network"
     }
   }
 }

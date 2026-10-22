@@ -9,7 +9,7 @@ const on = (channel: string) => (cb: (...args: any[]) => void) => {
 
 const api: Api = {
   getInfo: invoke('getInfo'),
-  openNetworkSettings: invoke('openNetworkSettings'),
+  fixNetwork: invoke('fixNetwork'),
   phoneLinks: invoke('phoneLinks'),
   getSettings: invoke('getSettings'),
   saveSettings: invoke('saveSettings'),

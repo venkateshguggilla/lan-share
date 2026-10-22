@@ -238,8 +238,9 @@ export function friendlyError(err: unknown): string {
   if (code === 'ECONNREFUSED') return 'That PC is not accepting connections (is LAN Share running there?)';
   if (code === 'ETIMEDOUT') {
     return (
-      'That PC did not respond. Its Windows Firewall is probably blocking LAN Share, usually because its ' +
-      'Wi-Fi is set to "Public". On that PC, open LAN Share and follow the network warning, or set the network to Private.'
+      'That PC did not respond. Its firewall is probably blocking LAN Share: on Windows the network may be set to ' +
+      '"Public"; on RudramOS the network must be Home and LAN Share must be allowed. ' +
+      'Open LAN Share on that PC and follow its network warning.'
     );
   }
   if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return 'That PC cannot be reached on this network';

@@ -32,6 +32,16 @@ Read & write folders. No phone app is needed. The browser shows a one-time certi
 certificate is self-signed. Downloads use short-lived single-file links (`POST /api/ticket`), so the session
 token never appears in a URL.
 
+## Linux and RudramOS
+
+`npm run dist:linux` builds `release/linux-unpacked/lan-share` (x64). RudramOS builds LAN Share into
+its image from a pinned commit of this repo (see the RudramOS `Containerfile`).
+
+On RudramOS every network is Public (all incoming traffic dropped) until an admin marks it as Home,
+and LAN Share must also be allowed there (`pcos-network share lan-share on`). LAN Share reads
+`pcos-network status`; until both are true it doesn't announce itself, and its network warning
+offers buttons that run those commands through `pkexec` (admin approval).
+
 ## How it works
 
 | Piece | File | Notes |
