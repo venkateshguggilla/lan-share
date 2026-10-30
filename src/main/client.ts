@@ -30,11 +30,44 @@ export class IdentityError extends Error {
 
 const CONNECT_TIMEOUT_MS = 10000;
 const MAX_JSON_RESPONSE = 20 * 1024 * 1024;
+// Idle pooled connections close after this, before the server's keep-alive timeout
+// (server.ts KEEP_ALIVE_MS), so a request never goes out on a connection the server just closed.
+const POOL_IDLE_MS = 15000;
+
+// One pool of keep-alive connections per remote PC: many small files no longer each pay for a
+// new TCP + TLS handshake. Only used for pinned requests.
+const pools = new Map<string, { key: string; agent: https.Agent }>();
+// Connections whose TLS handshake has finished (reused connections are already encrypted).
+const handshaken = new WeakSet<TLSSocket>();
+
+function poolFor(target: Target): https.Agent {
+  const key = `${target.host}:${target.port}`;
+  const current = pools.get(target.id);
+  if (current?.key === key) return current.agent;
+  current?.agent.destroy();
+  const agent = new https.Agent({
+    keepAlive: true,
+    maxSockets: 8,
+    maxFreeSockets: 8,
+    timeout: POOL_IDLE_MS,
+    // The certificate is self-signed; its fingerprint is checked on every request below.
+    rejectUnauthorized: false,
+  });
+  pools.set(target.id, { key, agent });
+  return agent;
+}
+
+/** Closes pooled connections to a PC (on disconnect, or when its identity is forgotten). */
+export function closeConnections(deviceId: string): void {
+  pools.get(deviceId)?.agent.destroy();
+  pools.delete(deviceId);
+}
 
 /**
  * Opens an HTTPS request and resolves once the TLS handshake is done and the server's
- * certificate matches the one we pinned for `target.id` (trust on first use). Nothing is
- * sent before that check, so passwords never reach an impostor.
+ * certificate matches the one we pinned for `target.id` (trust on first use). The check runs
+ * for every request, also on reused connections, and nothing is sent before it, so passwords
+ * never reach an impostor.
  */
 export function openRequest(
   target: Target,
@@ -50,8 +83,7 @@ export function openRequest(
       method,
       path: urlPath,
       headers,
-      agent: false,
-      // The certificate is self-signed; we verify its fingerprint ourselves below.
+      agent: pin ? poolFor(target) : false,
       rejectUnauthorized: false,
     });
     req.on('error', reject);
@@ -62,22 +94,26 @@ export function openRequest(
       req.destroy(err);
     }, CONNECT_TIMEOUT_MS);
     req.on('close', () => clearTimeout(timer));
-    req.on('socket', (socket) => {
-      (socket as TLSSocket).once('secureConnect', () => {
-        clearTimeout(timer);
-        if (pin) {
-          const fingerprint = (socket as TLSSocket).getPeerCertificate().fingerprint256;
-          const known = getConfig().knownHosts[target.id];
-          if (!known) {
-            getConfig().knownHosts[target.id] = fingerprint;
-            saveConfig();
-          } else if (known !== fingerprint) {
-            req.destroy(new IdentityError());
-            return;
-          }
+    const verify = (socket: TLSSocket) => {
+      clearTimeout(timer);
+      handshaken.add(socket);
+      if (pin) {
+        const fingerprint = socket.getPeerCertificate().fingerprint256;
+        const known = getConfig().knownHosts[target.id];
+        if (!known) {
+          getConfig().knownHosts[target.id] = fingerprint;
+          saveConfig();
+        } else if (known !== fingerprint) {
+          req.destroy(new IdentityError()); // Also closes the connection, so the pool never reuses it.
+          return;
         }
-        resolve(req);
-      });
+      }
+      resolve(req);
+    };
+    req.on('socket', (s) => {
+      const socket = s as TLSSocket;
+      if (handshaken.has(socket)) verify(socket); // Reused keep-alive connection.
+      else socket.once('secureConnect', () => verify(socket));
     });
   });
 }
@@ -155,6 +191,7 @@ export class RemoteClient extends EventEmitter {
   }
 
   dropSession(deviceId: string): void {
+    closeConnections(deviceId);
     if (this.tokens.delete(deviceId)) this.emit('disconnected', deviceId);
   }
 
@@ -214,6 +251,7 @@ export class RemoteClient extends EventEmitter {
   }
 
   forgetIdentity(deviceId: string): void {
+    closeConnections(deviceId);
     const cfg = getConfig();
     delete cfg.knownHosts[deviceId];
     delete cfg.savedLogins[deviceId];

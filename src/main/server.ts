@@ -13,10 +13,14 @@ import { isValidName, listDir, resolveInside, uniquePath } from './files';
 
 export const DEFAULT_PORT = 47821;
 const MAX_JSON_BODY = 64 * 1024;
+const CHUNK = 1024 * 1024; // File read/write size; Node's 64 KB default caps throughput.
 const TICKET_MS = 5 * 60 * 1000;
 // A connection that sends or receives nothing for this long is closed. There is no limit on a whole
 // request: Node's default (5 minutes) cut off big uploads partway through.
 const IDLE_TIMEOUT_MS = 60000;
+// Clients keep connections open between requests (keep-alive) and close idle ones after 15 s
+// (client.ts POOL_IDLE_MS); the server waits longer, so it never closes one a client is reusing.
+const KEEP_ALIVE_MS = 30000;
 
 // The phone web page (static/mobile), served to browsers that open https://<this-pc>:<port>/.
 const MOBILE_DIR = path.join(__dirname, '..', '..', 'static', 'mobile');
@@ -77,6 +81,7 @@ export class FileServer extends EventEmitter {
       this.handle(req, res).catch((err) => this.sendError(res, err));
     });
     server.setTimeout(IDLE_TIMEOUT_MS);
+    server.keepAliveTimeout = KEEP_ALIVE_MS;
     for (let port = DEFAULT_PORT; port < DEFAULT_PORT + 10; port++) {
       try {
         await new Promise<void>((resolve, reject) => {
@@ -273,7 +278,7 @@ export class FileServer extends EventEmitter {
       'Content-Length': st.size - start,
       ...(range ? { 'Content-Range': `bytes ${start}-${st.size - 1}/${st.size}` } : {}),
     });
-    await pipeline(fs.createReadStream(file, { start }), res).catch(() => {
+    await pipeline(fs.createReadStream(file, { start, highWaterMark: CHUNK }), res).catch(() => {
       // Client cancelled or connection dropped; nothing else to do.
     });
   }
@@ -289,7 +294,7 @@ export class FileServer extends EventEmitter {
 
     const temp = path.join(dir, `.${name}.${randomToken().slice(0, 8)}.lanshare-part`);
     try {
-      await pipeline(req, fs.createWriteStream(temp, { flags: 'wx' }));
+      await pipeline(req, fs.createWriteStream(temp, { flags: 'wx', highWaterMark: CHUNK }));
       const written = (await fs.promises.stat(temp)).size;
       if (written !== expected) throw new HttpError(400, 'Upload incomplete');
       const final = uniquePath(dir, name);

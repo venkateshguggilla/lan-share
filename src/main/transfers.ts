@@ -10,8 +10,9 @@ import { RemoteClient, RemoteError, friendlyError, openRequest, query, readJsonR
 import { uniquePath } from './files';
 import type { RemoteItem, Transfer } from '../shared/types';
 
-const CONCURRENCY = 2;
+const CONCURRENCY = 4;
 const IDLE_TIMEOUT_MS = 60000;
+const CHUNK = 1024 * 1024; // File read/write size; Node's 64 KB default caps throughput.
 
 interface Job {
   info: Transfer;
@@ -97,7 +98,7 @@ export class TransferManager extends EventEmitter {
 
       const temp = path.join(localDir, `.${name}.${crypto.randomBytes(4).toString('hex')}.lanshare-part`);
       try {
-        await pipeline(res, this.counter(job), fs.createWriteStream(temp, { flags: 'wx' }));
+        await pipeline(res, this.counter(job), fs.createWriteStream(temp, { flags: 'wx', highWaterMark: CHUNK }));
         if (job.info.done !== job.info.total) throw new Error('Download incomplete');
         await fs.promises.rename(temp, uniquePath(localDir, name));
       } catch (err) {
@@ -155,7 +156,7 @@ export class TransferManager extends EventEmitter {
         req.on('error', reject);
       });
       response.catch(() => {}); // Awaited below; the connection can fail before the upload finishes.
-      const sendError = await pipeline(fs.createReadStream(localPath), this.counter(job), req).then(
+      const sendError = await pipeline(fs.createReadStream(localPath, { highWaterMark: CHUNK }), this.counter(job), req).then(
         () => null,
         (err: unknown) => err,
       );

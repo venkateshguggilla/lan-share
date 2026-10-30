@@ -115,6 +115,26 @@ app.whenReady().then(async () => {
     assert.ok(fs.existsSync(path.join(dl, 'hello (1).txt')));
     console.log('ok  download file, folder, and no-overwrite naming');
 
+    // ---- Many small files reuse connections (keep-alive) instead of one TLS handshake per file
+    {
+      const many = path.join(rw, 'many');
+      fs.mkdirSync(many);
+      for (let i = 0; i < 20; i++) fs.writeFileSync(path.join(many, `f${i}.txt`), `file ${i}`);
+      let handshakes = 0;
+      const count = () => handshakes++;
+      server.server.on('secureConnection', count);
+      tm.clearFinished();
+      await tm.download('remote-1', 'rw', '', [{ name: 'many', isDir: true }], dl);
+      await new Promise((res) => setTimeout(res, 200)); // Folder walk enqueues asynchronously.
+      results = await waitTransfers(tm);
+      server.server.off('secureConnection', count);
+      assert.ok(results.every((t) => t.status === 'done'), JSON.stringify(results));
+      assert.equal(fs.readFileSync(path.join(dl, 'many', 'f19.txt'), 'utf8'), 'file 19');
+      assert.ok(handshakes <= 8, `${handshakes} new connections for 21 requests`);
+      fs.rmSync(many, { recursive: true });
+      console.log(`ok  20 small files over ${handshakes} connection(s)`);
+    }
+
     // ---- Upload file + folder
     const up = path.join(tmp, 'to-upload');
     fs.mkdirSync(path.join(up, 'inner'), { recursive: true });
