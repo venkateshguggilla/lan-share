@@ -28,7 +28,7 @@ and every signing request is approved by hand.
 This program will not transfer any information to other networked systems unless specifically
 requested by the user or the person installing or operating it. Files and folder listings go only
 to devices on your network that you connect to, or that connect with this PC's password. LAN Share
-has no telemetry, no accounts and no internet services.
+has no telemetry, no accounts and no internet services. Full policy: [PRIVACY.md](PRIVACY.md).
 
 ## License
 
