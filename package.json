@@ -13,7 +13,7 @@
     "dist:linux": "npm run build && electron-builder --linux dir --x64 --publish never"
   },
   "author": "Venky",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "@types/node": "^26.6.5",
@@ -27,7 +27,6 @@
     "selfsigned": "^5.5.0"
   },
   "productName": "LAN Share",
-  "private": true,
   "build": {
     "appId": "com.venky.lanshare",
     "productName": "LAN Share",
@@ -63,7 +62,8 @@
       "shortcutName": "LAN Share",
       "include": "build/installer.nsh",
       "runAfterFinish": true,
-      "artifactName": "LAN-Share-Setup-${version}.exe"
+      "artifactName": "LAN-Share-Setup-${version}.exe",
+      "license": "build/installer-notice.txt"
     },
     "linux": {
       "target": [
@@ -73,6 +73,13 @@
       "icon": "build/icon.png",
       "category": "Network",
       "synopsis": "Share files between PCs and phones on your network"
-    }
-  }
+    },
+    "copyright": "Copyright (c) 2026 venkateshguggilla"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/venkateshguggilla/lan-share.git"
+  },
+  "homepage": "https://github.com/venkateshguggilla/lan-share",
+  "private": true
 }

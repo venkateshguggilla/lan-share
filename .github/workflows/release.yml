@@ -1,0 +1,142 @@
+# Builds the Windows installer. With SignPath configured (secret SIGNPATH_API_TOKEN and variable
+# SIGNPATH_ORGANIZATION_ID), LAN Share.exe and then the installer are signed by SignPath; each
+# signing request waits for manual approval in SignPath. Without it, the installer is unsigned.
+# A pushed tag vX.Y.Z (matching package.json) creates a draft GitHub Release to review and publish.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the draft release
+  actions: read # SignPath downloads the unsigned artifacts
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      SIGNING: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false' # electron-builder must not sign; SignPath does
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Version
+        run: |
+          $v = node -p "require('./package.json').version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$v") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package.json version $v"
+          }
+          "VERSION=$v" >> $env:GITHUB_ENV
+          "Building LAN Share $v (signing: $env:SIGNING)"
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: node test/netprofile.test.js
+      - run: npx electron test/e2e.js
+
+      - name: Build the app (unpacked)
+        run: npx electron-builder --win dir --x64 --publish never
+
+      # ---- Sign LAN Share.exe ----
+      - name: Upload unsigned app
+        if: env.SIGNING == 'true'
+        id: unsigned-app
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-app
+          path: release/win-unpacked
+          retention-days: 1
+      - name: Sign the app (SignPath; approve the request in SignPath)
+        if: env.SIGNING == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'lan-share' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: app
+          github-artifact-id: ${{ steps.unsigned-app.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed-app
+      - name: Use the signed app
+        if: env.SIGNING == 'true'
+        run: |
+          $sig = Get-AuthenticodeSignature 'signed-app/LAN Share.exe'
+          if ($sig.Status -ne 'Valid') { throw "LAN Share.exe signature: $($sig.Status)" }
+          "Signed by: $($sig.SignerCertificate.Subject)"
+          Remove-Item -Recurse -Force release/win-unpacked
+          Move-Item signed-app release/win-unpacked
+
+      # ---- Installer (contains the app built above) ----
+      - name: Build the installer
+        run: |
+          Move-Item release/win-unpacked app-prepackaged
+          npx electron-builder --win nsis --x64 --prepackaged app-prepackaged --publish never
+
+      - name: Upload unsigned installer
+        if: env.SIGNING == 'true'
+        id: unsigned-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: release/LAN-Share-Setup-${{ env.VERSION }}.exe
+          retention-days: 1
+      - name: Sign the installer (SignPath; approve the request in SignPath)
+        if: env.SIGNING == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'lan-share' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          parameters: |
+            version: "${{ env.VERSION }}"
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed-installer
+
+      - name: Collect the installer
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $name = "LAN-Share-Setup-$env:VERSION.exe"
+          if ($env:SIGNING -eq 'true') {
+            Copy-Item "signed-installer/$name" out/
+            $sig = Get-AuthenticodeSignature "out/$name"
+            if ($sig.Status -ne 'Valid') { throw "Installer signature: $($sig.Status)" }
+            "Signed by: $($sig.SignerCertificate.Subject)"
+          } else {
+            Copy-Item "release/$name" out/
+            'Unsigned build (SignPath is not configured)'
+          }
+          (Get-FileHash "out/$name" -Algorithm SHA256).Hash.ToLower() + "  $name" | Out-File -Encoding ascii out/SHA256SUMS.txt
+          Get-Content out/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAN-Share-Setup-${{ env.VERSION }}
+          path: out/
+
+      - name: Draft GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = if ($env:SIGNING -eq 'true') {
+            "Windows installer, signed via SignPath. See the README for what the installer changes and how to uninstall."
+          } else {
+            "Windows installer (unsigned: Windows SmartScreen asks to confirm; Smart App Control blocks it). See the README."
+          }
+          gh release create $env:GITHUB_REF_NAME out/* --draft --title "LAN Share $env:VERSION" --notes $notes

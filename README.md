@@ -1,6 +1,38 @@
 # LAN Share
 
-Desktop app (Electron + TypeScript) for browsing and copying files between PCs on the same Wi-Fi/LAN.
+Desktop app (Electron + TypeScript) for browsing and copying files between PCs on the same Wi-Fi/LAN,
+and to/from phones through their web browser. Windows, Linux and RudramOS.
+
+## Download
+
+Windows installer: [Releases](https://github.com/venkateshguggilla/lan-share/releases).
+The installer adds a Windows Firewall rule so devices on your **Private** networks can connect, and
+shows this before installing. Uninstall from **Settings → Apps → Installed apps → LAN Share**, which
+also removes the firewall rule; settings stay in `%APPDATA%\LAN Share` until you delete that folder.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org) (application in progress; releases made before approval
+are unsigned).
+
+Windows releases are built from this repository by GitHub Actions
+([release workflow](.github/workflows/release.yml)); only files built from this source are signed,
+and every signing request is approved by hand.
+
+- Committers and reviewers: [venkateshguggilla](https://github.com/venkateshguggilla)
+- Approvers: [venkateshguggilla](https://github.com/venkateshguggilla)
+
+## Privacy
+
+This program will not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it. Files and folder listings go only
+to devices on your network that you connect to, or that connect with this PC's password. LAN Share
+has no telemetry, no accounts and no internet services.
+
+## License
+
+[MIT](LICENSE)
 
 ## Run
 

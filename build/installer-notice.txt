@@ -1,0 +1,25 @@
+LAN Share - before you install
+
+WHAT THIS INSTALLER CHANGES ON YOUR PC
+- Installs LAN Share for all users (default: C:\Program Files\LAN Share) and adds
+  Start menu and desktop shortcuts.
+- Adds a Windows Firewall rule named "LAN Share" that lets other devices on your
+  PRIVATE (home/office) networks connect to LAN Share. It does not apply to Public
+  networks. Uninstalling LAN Share removes this rule.
+
+LAN Share only accepts connections when you have set a password, and only shows
+the folders you choose to share. It sends nothing to the internet: files go
+directly between devices on your network, and only when you ask.
+
+UNINSTALLING
+Settings > Apps > Installed apps > LAN Share > Uninstall. This removes the app,
+its shortcuts and the firewall rule. Your settings stay in
+%APPDATA%\LAN Share; delete that folder to remove them too.
+
+LICENSE
+MIT License. Copyright (c) 2026 venkateshguggilla.
+Full text: https://github.com/venkateshguggilla/lan-share/blob/master/LICENSE
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.

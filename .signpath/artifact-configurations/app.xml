@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "app": the unpacked Windows app (release/win-unpacked, zipped
+     by actions/upload-artifact). Only LAN Share's own executable is signed; the Chromium/Electron
+     DLLs and electron-builder's elevate.exe are third-party files and are left as they are. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="LAN Share.exe" product-name="LAN Share">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
