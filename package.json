@@ -1,6 +1,6 @@
 {
   "name": "lan-share",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Browse and copy files between PCs on the same Wi-Fi/LAN",
   "main": "dist/main/main.js",
   "scripts": {
