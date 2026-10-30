@@ -14,6 +14,9 @@ import { isValidName, listDir, resolveInside, uniquePath } from './files';
 export const DEFAULT_PORT = 47821;
 const MAX_JSON_BODY = 64 * 1024;
 const TICKET_MS = 5 * 60 * 1000;
+// A connection that sends or receives nothing for this long is closed. There is no limit on a whole
+// request: Node's default (5 minutes) cut off big uploads partway through.
+const IDLE_TIMEOUT_MS = 60000;
 
 // The phone web page (static/mobile), served to browsers that open https://<this-pc>:<port>/.
 const MOBILE_DIR = path.join(__dirname, '..', '..', 'static', 'mobile');
@@ -70,9 +73,10 @@ export class FileServer extends EventEmitter {
     if (this.server) return;
     await this.ensureCertificate();
     const { key, cert } = getConfig().tls!;
-    const server = https.createServer({ key, cert }, (req, res) => {
+    const server = https.createServer({ key, cert, requestTimeout: 0 }, (req, res) => {
       this.handle(req, res).catch((err) => this.sendError(res, err));
     });
+    server.setTimeout(IDLE_TIMEOUT_MS);
     for (let port = DEFAULT_PORT; port < DEFAULT_PORT + 10; port++) {
       try {
         await new Promise<void>((resolve, reject) => {

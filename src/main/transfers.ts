@@ -154,6 +154,7 @@ export class TransferManager extends EventEmitter {
         req.on('response', (res) => readJsonResponse(res).then(resolve, reject));
         req.on('error', reject);
       });
+      response.catch(() => {}); // Awaited below; the connection can fail before the upload finishes.
       const sendError = await pipeline(fs.createReadStream(localPath), this.counter(job), req).then(
         () => null,
         (err: unknown) => err,

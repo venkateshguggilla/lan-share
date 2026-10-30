@@ -3,6 +3,7 @@
 const { app } = require('electron');
 const assert = require('assert');
 const fs = require('fs');
+const https = require('https');
 const os = require('os');
 const path = require('path');
 
@@ -136,6 +137,36 @@ app.whenReady().then(async () => {
     assert.match(results[0].error, /TestPC shares "Movies" as read-only.*Read & write/);
     assert.equal(fs.readdirSync(ro).length, 0);
     console.log('ok  read-only folder rejects uploads');
+
+    // ---- Long transfers: only idle connections time out, not whole requests (Node's default is 5 minutes)
+    assert.equal(server.server.requestTimeout, 0);
+    assert.equal(server.server.timeout, 60000);
+    console.log('ok  no time limit on a whole upload, idle connections still close');
+
+    // ---- Upload cut off partway: the transfer fails with a clear message and nothing goes unhandled
+    {
+      const unhandled = [];
+      const onUnhandled = (err) => unhandled.push(err);
+      process.on('unhandledRejection', onUnhandled);
+      const { key, cert } = getConfig().tls;
+      const cutter = https.createServer({ key, cert }, (req) => req.once('data', () => req.socket.destroy()));
+      await new Promise((res) => cutter.listen(0, '127.0.0.1', res));
+      const cutTarget = { id: 'remote-cut', name: 'CutPC', host: '127.0.0.1', port: cutter.address().port };
+      const cutClient = new RemoteClient(() => cutTarget);
+      cutClient.tokens.set('remote-cut', 'token');
+      const cutTm = new TransferManager(cutClient);
+      const big = path.join(tmp, 'big.bin');
+      fs.writeFileSync(big, Buffer.alloc(32 * 1024 * 1024, 1));
+      await cutTm.upload('remote-cut', 'rw', '', [big]);
+      results = await waitTransfers(cutTm);
+      await new Promise((res) => setTimeout(res, 100));
+      process.off('unhandledRejection', onUnhandled);
+      cutter.close();
+      assert.equal(results[0].status, 'error');
+      assert.equal(results[0].error, 'The connection was interrupted');
+      assert.deepEqual(unhandled, []);
+      console.log('ok  upload cut off partway fails cleanly');
+    }
 
     // ---- Phone web page and download links
     {

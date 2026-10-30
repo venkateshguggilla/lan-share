@@ -244,6 +244,6 @@ export function friendlyError(err: unknown): string {
     );
   }
   if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return 'That PC cannot be reached on this network';
-  if (code === 'ECONNRESET') return 'The connection was interrupted';
+  if (code === 'ECONNRESET' || code === 'EPIPE') return 'The connection was interrupted';
   return err instanceof Error ? err.message : String(err);
 }
