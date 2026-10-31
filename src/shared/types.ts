@@ -13,13 +13,32 @@ export interface Settings {
   hasPassword: boolean;
   allowConnections: boolean;
   sharedFolders: SharedFolder[];
+  runInBackground: boolean;
+  startAtLogin: boolean;
+  // False when running from source (start-at-login only works for the installed app).
+  canStartAtLogin: boolean;
+  askBeforeConnect: boolean;
+  approvedDevices: { clientId: string; clientName: string; approvedAt: number }[];
 }
 
 export interface SettingsUpdate {
   deviceName: string;
   allowConnections: boolean;
   sharedFolders: SharedFolder[];
+  runInBackground: boolean;
+  startAtLogin: boolean;
+  askBeforeConnect: boolean;
 }
+
+/** A device that entered the right password and is waiting for this PC to accept it. */
+export interface ApprovalRequest {
+  id: string;
+  clientName: string;
+  ip: string;
+  kind: 'pc' | 'phone';
+}
+
+export type ApprovalDecision = 'once' | 'always' | 'reject';
 
 export interface AppInfo {
   deviceId: string;

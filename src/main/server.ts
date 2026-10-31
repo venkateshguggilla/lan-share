@@ -10,6 +10,7 @@ import { generate } from 'selfsigned';
 import { getConfig, saveConfig } from './config';
 import { Lockout, SessionStore, randomToken, sha256, verifyPassword } from './auth';
 import { isValidName, listDir, resolveInside, uniquePath } from './files';
+import type { ApprovalDecision, ApprovalRequest } from '../shared/types';
 
 export const DEFAULT_PORT = 47821;
 const MAX_JSON_BODY = 64 * 1024;
@@ -51,12 +52,20 @@ class HttpError extends Error {
   }
 }
 
+/** Asks the person at this PC whether a device may connect. Resolves 'timeout' if nobody answers. */
+export type Approver = (request: ApprovalRequest, signal: AbortSignal) => Promise<ApprovalDecision | 'timeout'>;
+
+const MAX_PENDING_APPROVALS = 3;
+
 export class FileServer extends EventEmitter {
   private server: https.Server | null = null;
   readonly sessions = new SessionStore();
   private lockout = new Lockout();
   private tickets = new Map<string, Ticket>();
+  private pendingApprovals = new Set<string>(); // client ids waiting for an answer
   port: number | null = null;
+  // Set by the app; without it (tests, no UI) devices are let in after the password alone.
+  approve: Approver | null = null;
 
   async ensureCertificate(): Promise<void> {
     const cfg = getConfig();
@@ -238,6 +247,12 @@ export class FileServer extends EventEmitter {
     }
     this.lockout.succeed(ip);
 
+    // Right password; now the person at this PC accepts or rejects devices it doesn't know yet.
+    const known = cfg.approvedDevices.some((d) => d.clientId === clientId);
+    if (cfg.askBeforeConnect && !known && this.approve) {
+      await this.waitForApproval(req, clientId, clientName, ip, body.kind === 'phone' ? 'phone' : 'pc');
+    }
+
     const token = this.sessions.create(clientId, clientName, ip);
     let rememberToken: string | undefined;
     if (body.remember === true && !fromRemembered) {
@@ -249,6 +264,40 @@ export class FileServer extends EventEmitter {
     this.emit('sessions');
     this.emit('connected', clientName, ip);
     this.json(res, 200, { token, rememberToken, name: cfg.deviceName });
+  }
+
+  private async waitForApproval(
+    req: IncomingMessage, clientId: string, clientName: string, ip: string, kind: ApprovalRequest['kind'],
+  ): Promise<void> {
+    const pc = getConfig().deviceName;
+    if (this.pendingApprovals.has(clientId)) throw new HttpError(409, `Already waiting for ${pc} to accept this device`);
+    if (this.pendingApprovals.size >= MAX_PENDING_APPROVALS) {
+      throw new HttpError(429, 'Too many devices are waiting to connect. Try again in a minute');
+    }
+    this.pendingApprovals.add(clientId);
+    // If the device gives up (closes the connection), the question on this PC goes away.
+    const controller = new AbortController();
+    const onClose = () => controller.abort();
+    req.socket.once('close', onClose);
+    req.socket.setTimeout(0); // Answering can take longer than the idle timeout.
+    try {
+      const decision = await this.approve!({ id: randomToken(), clientName, ip, kind }, controller.signal);
+      if (decision === 'reject') throw new HttpError(403, `${pc} declined the connection`);
+      if (decision === 'timeout') {
+        throw new HttpError(403, `Nobody accepted the connection on ${pc} in time. Ask someone at that PC to click Allow, then try again`);
+      }
+      if (decision === 'always') {
+        const cfg = getConfig();
+        cfg.approvedDevices = cfg.approvedDevices.filter((d) => d.clientId !== clientId);
+        cfg.approvedDevices.push({ clientId, clientName, approvedAt: Date.now() });
+        saveConfig();
+        this.emit('approved');
+      }
+    } finally {
+      this.pendingApprovals.delete(clientId);
+      req.socket.off('close', onClose);
+      if (!req.socket.destroyed) req.socket.setTimeout(IDLE_TIMEOUT_MS);
+    }
   }
 
   /** Resolves ?root=&<param>= to an existing path inside a shared folder. */

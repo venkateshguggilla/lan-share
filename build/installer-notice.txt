@@ -6,15 +6,19 @@ WHAT THIS INSTALLER CHANGES ON YOUR PC
 - Adds a Windows Firewall rule named "LAN Share" that lets other devices on your
   PRIVATE (home/office) networks connect to LAN Share. It does not apply to Public
   networks. Uninstalling LAN Share removes this rule.
+- When you first open LAN Share, it sets itself to start when you sign in to
+  Windows and keeps running in the taskbar tray, so other devices can find this
+  PC. Turn either off in LAN Share > Settings > Running in the background.
 
 LAN Share only accepts connections when you have set a password, and only shows
-the folders you choose to share. It sends nothing to the internet: files go
-directly between devices on your network, and only when you ask.
+the folders you choose to share. By default it also asks you to accept or reject
+each new device. It sends nothing to the internet: files go directly between
+devices on your network, and only when you ask.
 
 UNINSTALLING
 Settings > Apps > Installed apps > LAN Share > Uninstall. This removes the app,
-its shortcuts and the firewall rule. Your settings stay in
-%APPDATA%\LAN Share; delete that folder to remove them too.
+its shortcuts, the firewall rule and the start-at-sign-in entry. Your settings
+stay in %APPDATA%\LAN Share; delete that folder to remove them too.
 
 LICENSE
 MIT License. Copyright (c) 2026 venkateshguggilla.

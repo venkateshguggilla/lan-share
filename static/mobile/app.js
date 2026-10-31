@@ -135,11 +135,19 @@ function renderLogin(message) {
         go.disabled = true;
         go.textContent = 'Connecting…';
         err.textContent = '';
+        // With the right password, the PC may ask its user to accept this phone first.
+        const waiting = setTimeout(() => {
+          go.textContent = 'Waiting for ' + (state.pcName || 'the PC') + ' to accept…';
+        }, 1500);
         try {
-          const res = await api('POST', '/api/auth', { password: pw.value, clientId: clientId(), clientName: deviceLabel() });
+          const res = await api('POST', '/api/auth', {
+            password: pw.value, clientId: clientId(), clientName: deviceLabel(), kind: 'phone',
+          });
+          clearTimeout(waiting);
           setToken(res.token);
           await openRoots();
         } catch (e) {
+          clearTimeout(waiting);
           err.textContent = e.message;
           go.disabled = false;
           go.textContent = 'Connect';

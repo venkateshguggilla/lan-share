@@ -215,6 +215,83 @@ app.whenReady().then(async () => {
       console.log('ok  phone page served, download links work and cannot be forged');
     }
 
+    // ---- Accept / reject: after the right password, this PC's user decides (scripted here)
+    {
+      const asked = [];
+      let answer = 'reject';
+      server.approve = async (request, signal) => {
+        asked.push(request);
+        if (answer === 'wait') return new Promise((res) => signal.addEventListener('abort', () => res('timeout')));
+        return answer;
+      };
+      getConfig().askBeforeConnect = true;
+      client.dropSession('remote-1');
+
+      r = await client.connect('remote-1', { password: 'wrong' }, false);
+      assert.match(r.error, /Incorrect password/);
+      assert.equal(asked.length, 0, 'no popup before the password is right');
+
+      r = await client.connect('remote-1', { password: 'correct-horse' }, false);
+      assert.equal(r.ok, false);
+      assert.match(r.error, /TestPC declined the connection/);
+      assert.equal(asked.length, 1);
+      assert.equal(asked[0].clientName, getConfig().deviceName);
+      assert.equal(asked[0].kind, 'pc');
+
+      answer = 'timeout';
+      r = await client.connect('remote-1', { password: 'correct-horse' }, false);
+      assert.match(r.error, /Nobody accepted the connection on TestPC in time/);
+
+      answer = 'once';
+      r = await client.connect('remote-1', { password: 'correct-horse' }, false);
+      assert.equal(r.ok, true, r.error);
+      assert.equal(getConfig().approvedDevices.length, 0, '"Allow once" is not remembered');
+      client.dropSession('remote-1');
+      r = await client.connect('remote-1', { password: 'correct-horse' }, false);
+      assert.equal(asked.length, 4, '"Allow once" asks again next time');
+      assert.equal(r.ok, true);
+
+      answer = 'always';
+      client.dropSession('remote-1');
+      r = await client.connect('remote-1', { password: 'correct-horse' }, false);
+      assert.equal(r.ok, true, r.error);
+      assert.deepEqual(getConfig().approvedDevices.map((d) => d.clientId), [getConfig().deviceId]);
+      client.dropSession('remote-1');
+      answer = 'reject';
+      r = await client.connect('remote-1', { password: 'correct-horse' }, false);
+      assert.equal(r.ok, true, '"Always allow" skips the question');
+      assert.equal(asked.length, 5);
+      getConfig().approvedDevices = [];
+
+      // The device gives up while waiting: the question on this PC is withdrawn.
+      answer = 'wait';
+      let aborted = false;
+      const waitingApprove = server.approve;
+      server.approve = (request, signal) => {
+        signal.addEventListener('abort', () => (aborted = true));
+        return waitingApprove(request, signal);
+      };
+      const body = Buffer.from(JSON.stringify({ password: 'correct-horse', clientId: 'phone-1', clientName: 'iPhone', kind: 'phone' }));
+      const pending = await openRequest(target, 'POST', '/api/auth', { 'Content-Type': 'application/json', 'Content-Length': body.length });
+      pending.on('error', () => {});
+      pending.end(body);
+      await new Promise((res) => setTimeout(res, 300));
+      assert.equal(asked.at(-1).kind, 'phone');
+      // A second attempt from the same device while the first waits is refused, not asked twice.
+      const again = await client.request('remote-1', 'POST', '/api/auth',
+        { password: 'correct-horse', clientId: 'phone-1', clientName: 'iPhone', kind: 'phone' }, false).catch((e) => e);
+      assert.match(String(again.message), /Already waiting/);
+      pending.destroy();
+      await new Promise((res) => setTimeout(res, 300));
+      assert.ok(aborted, 'popup withdrawn when the device disconnects');
+
+      server.approve = null;
+      client.dropSession('remote-1');
+      r = await client.connect('remote-1', { password: 'correct-horse' }, false);
+      assert.equal(r.ok, true);
+      console.log('ok  accept/reject: reject, timeout, allow once, always allow, give up, no duplicates');
+    }
+
     // ---- Remember-me login works, then password change revokes everything
     client.dropSession('remote-1');
     r = await client.connectSaved('remote-1');

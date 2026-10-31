@@ -751,7 +751,12 @@ function passwordDialog(d: Device): void {
           go.disabled = true;
           go.textContent = 'Connecting…';
           err.textContent = '';
+          // With the right password, the other PC may ask its user to accept this one first.
+          const waiting = setTimeout(() => {
+            go.textContent = `Waiting for ${d.name} to accept…`;
+          }, 1500);
           const res = await api.connect(d.id, pw.value, remember.checked);
+          clearTimeout(waiting);
           go.disabled = false;
           go.textContent = 'Connect';
           if (res.ok) {
@@ -871,10 +876,32 @@ function settingsDialog(firstRun = false): void {
   const pw = h('input', { type: 'password', autocomplete: 'new-password' });
   const pw2 = h('input', { type: 'password', autocomplete: 'new-password' });
   const allow = h('input', { type: 'checkbox', checked: s.allowConnections });
+  // When a device enters the right password: ask here first, or let it straight in.
+  const ask = h('input', { type: 'radio', name: 'approval', value: 'ask', checked: s.askBeforeConnect });
+  const direct = h('input', { type: 'radio', name: 'approval', value: 'direct', checked: !s.askBeforeConnect });
+  const background = h('input', { type: 'checkbox', checked: s.runInBackground });
+  const atLogin = h('input', { type: 'checkbox', checked: s.startAtLogin, disabled: !s.canStartAtLogin });
   const err = h('div', { class: 'error-text' });
   let folders: SharedFolder[] = s.sharedFolders.map((f) => ({ ...f }));
   const folderList = h('div', { class: 'folder-list' });
   const sessionList = h('div', { class: 'folder-list' });
+  const approvedList = h('div', { class: 'folder-list' });
+  let approved = s.approvedDevices;
+
+  const renderApproved = () => {
+    approvedList.replaceChildren(
+      ...(approved.length
+        ? approved.map((d) => h('div', { class: 'folder-item' },
+            h('span', { class: 'path' }, d.clientName),
+            h('span', { class: 'hint' }, `allowed ${new Date(d.approvedAt).toLocaleDateString()}`),
+            h('button', { class: 'btn small danger', type: 'button', onclick: async () => {
+              approved = (await api.forgetApprovedDevice(d.clientId)).approvedDevices;
+              renderApproved();
+            } }, 'Remove')))
+        : [h('div', { class: 'hint' }, 'None yet. Click "Always allow" in the popup to add a device here.')]),
+    );
+  };
+  renderApproved();
 
   const renderFolders = () => {
     folderList.replaceChildren(
@@ -935,7 +962,14 @@ function settingsDialog(firstRun = false): void {
           }
           save.disabled = true;
           try {
-            state.settings = await api.saveSettings({ deviceName: name.value, allowConnections: allow.checked, sharedFolders: folders });
+            state.settings = await api.saveSettings({
+              deviceName: name.value,
+              allowConnections: allow.checked,
+              sharedFolders: folders,
+              askBeforeConnect: ask.checked,
+              runInBackground: background.checked,
+              startAtLogin: atLogin.checked,
+            });
             await refreshInfo();
             close();
             toast(pw.value && !needPassword ? 'Password changed. Connected PCs must log in again.' : 'Settings saved');
@@ -963,9 +997,22 @@ function settingsDialog(firstRun = false): void {
           renderFolders();
         }
       } }, '+ Add folder')),
-      h('label', { class: 'check' }, allow, 'Allow other PCs to connect to this PC'),
+      h('label', { class: 'check' }, allow, 'Allow other devices to connect to this PC'),
+      h('div', { class: 'divider' }),
+      h('div', { class: 'field' }, h('label', {}, 'When another PC or phone enters the password')),
+      h('label', { class: 'check' }, ask, 'Ask me to accept or reject it (recommended)'),
+      h('div', { class: 'hint indent' }, 'This PC shows a popup. Devices you mark "Always allow" skip it.'),
+      h('label', { class: 'check' }, direct, 'Let it connect directly'),
+      h('div', { class: 'hint indent' }, 'Anyone who knows the password gets in without a popup.'),
+      h('div', { class: 'divider' }),
+      h('div', { class: 'field' }, h('label', {}, 'Running in the background')),
+      h('label', { class: 'check' }, atLogin, 'Start LAN Share when I sign in, so other devices can always find this PC'),
+      s.canStartAtLogin ? null : h('div', { class: 'hint' }, 'Available in the installed app.'),
+      h('label', { class: 'check' }, background, 'Keep running in the tray when I close the window'),
       firstRun ? null : h('div', { class: 'divider' }),
-      firstRun ? null : h('div', { class: 'field' }, h('label', {}, 'PCs connected to this PC')),
+      firstRun ? null : h('div', { class: 'field' }, h('label', {}, 'Always allowed devices')),
+      firstRun ? null : approvedList,
+      firstRun ? null : h('div', { class: 'field' }, h('label', {}, 'Devices connected to this PC')),
       firstRun ? null : sessionList,
       err,
       h('div', { class: 'modal-actions' },

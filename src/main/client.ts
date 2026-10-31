@@ -213,7 +213,7 @@ export class RemoteClient extends EventEmitter {
         deviceId,
         'POST',
         '/api/auth',
-        { ...credentials, remember, clientId: cfg.deviceId, clientName: cfg.deviceName },
+        { ...credentials, remember, clientId: cfg.deviceId, clientName: cfg.deviceName, kind: 'pc' },
         false,
       );
       this.tokens.set(deviceId, res.token);

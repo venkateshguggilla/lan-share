@@ -1,6 +1,7 @@
 // The API exposed to the renderer by the preload script (window.api).
 import type {
-  AppInfo, ConnectResult, NetworkFix, PhoneLink, Device, IncomingSession, ListResult, RemoteItem,
+  AppInfo, ApprovalDecision, ApprovalRequest, ConnectResult, NetworkFix, PhoneLink, Device, IncomingSession, ListResult,
+  RemoteItem,
   RemoteRoot, Settings, SettingsUpdate, Transfer,
 } from './types';
 
@@ -16,6 +17,11 @@ export interface Api {
 
   listSessions(): Promise<IncomingSession[]>;
   revokeSession(id: string): Promise<void>;
+  forgetApprovedDevice(clientId: string): Promise<Settings>;
+
+  // Accept / reject popup
+  approvalInfo(id: string): Promise<ApprovalRequest | null>;
+  approvalRespond(id: string, decision: ApprovalDecision): Promise<void>;
 
   listDevices(): Promise<Device[]>;
   addManualDevice(host: string, port: number): Promise<{ ok: boolean; error?: string }>;

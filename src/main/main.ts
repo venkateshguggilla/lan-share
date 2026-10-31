@@ -1,6 +1,7 @@
 // Electron entry point: wires the file server, discovery, client and transfers to the UI.
-import { BrowserWindow, Notification, app, dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, shell } from 'electron';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getConfig, loadConfig, saveConfig } from './config';
@@ -13,7 +14,9 @@ import { listDir, listDrives } from './files';
 import { PCOS_NETWORK, RUDRAMOS_SERVICE, isRudramOS, networkIssue } from './netprofile';
 import { execFile } from 'child_process';
 import * as QRCode from 'qrcode';
-import type { AppInfo, Device, NetworkFix, NetworkIssue, PhoneLink, Settings, SettingsUpdate } from '../shared/types';
+import type {
+  AppInfo, ApprovalDecision, ApprovalRequest, Device, NetworkFix, NetworkIssue, PhoneLink, Settings, SettingsUpdate,
+} from '../shared/types';
 
 // LANSHARE_PROFILE lets you run a second copy on one PC for testing (separate settings).
 const profile = process.env.LANSHARE_PROFILE;
@@ -21,12 +24,28 @@ if (profile) app.setPath('userData', path.join(app.getPath('appData'), `LAN Shar
 else if (!app.requestSingleInstanceLock()) app.quit();
 
 let win: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let quitting = false;
+let toldAboutTray = false;
 const server = new FileServer();
 let discovery: Discovery;
 let client: RemoteClient;
 let transfers: TransferManager;
 let netIssue: NetworkIssue | null = null;
 let networkChecked = false;
+
+// Started by the sign-in entry: stay in the tray until the user opens LAN Share.
+const startHidden = process.argv.includes('--hidden');
+// Start-at-login points at the installed app; running from source would register electron.exe.
+const canStartAtLogin = app.isPackaged && !profile;
+const APPROVAL_TIMEOUT_MS = 60000;
+const STATIC = path.join(__dirname, '..', '..', 'static');
+const WEB_PREFERENCES = {
+  preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+  contextIsolation: true,
+  sandbox: true,
+  nodeIntegration: false,
+};
 
 function send(channel: string, ...args: unknown[]): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args);
@@ -40,7 +59,166 @@ function settings(): Settings {
     hasPassword: !!cfg.passwordHash,
     allowConnections: cfg.allowConnections,
     sharedFolders: cfg.sharedFolders,
+    runInBackground: cfg.runInBackground,
+    startAtLogin: cfg.startAtLogin,
+    canStartAtLogin,
+    askBeforeConnect: cfg.askBeforeConnect,
+    approvedDevices: cfg.approvedDevices,
   };
+}
+
+// ---------- Background: tray, start at sign-in ----------
+
+function showWindow(): void {
+  if (!win || win.isDestroyed()) createWindow(true);
+  else {
+    if (win.isMinimized()) win.restore();
+    win.show();
+  }
+  win!.focus();
+}
+
+function quit(): void {
+  quitting = true;
+  app.quit();
+}
+
+function createTray(): void {
+  const icon = nativeImage.createFromPath(path.join(STATIC, 'mobile', 'icon.png'));
+  tray = new Tray(icon.resize({ width: process.platform === 'win32' ? 16 : 22 }));
+  tray.on('click', showWindow);
+  updateTray();
+}
+
+function updateTray(): void {
+  if (!tray) return;
+  const cfg = getConfig();
+  const status = !cfg.allowConnections ? 'Sharing paused' : server.running ? 'Other devices can connect' : 'Not sharing';
+  tray.setToolTip(`LAN Share: ${status}`);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Open LAN Share', click: showWindow },
+      { label: status, enabled: false },
+      {
+        label: 'Allow other devices to connect',
+        type: 'checkbox',
+        checked: cfg.allowConnections,
+        click: (item) => setAllowConnections(item.checked).catch(() => {}),
+      },
+      { type: 'separator' },
+      { label: 'Quit LAN Share', click: quit },
+    ]),
+  );
+}
+
+async function setAllowConnections(allow: boolean): Promise<void> {
+  const cfg = getConfig();
+  if (cfg.allowConnections && !allow) discovery.sendHello(true); // Say goodbye first.
+  cfg.allowConnections = allow;
+  saveConfig();
+  await applyServerState();
+}
+
+/** Registers or removes LAN Share as a program that starts (hidden) when the user signs in. */
+function applyStartAtLogin(): void {
+  if (!canStartAtLogin) return;
+  const enabled = getConfig().startAtLogin;
+  try {
+    if (process.platform === 'linux') {
+      const dir = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'autostart');
+      const file = path.join(dir, 'lan-share.desktop');
+      if (!enabled) return void fs.rmSync(file, { force: true });
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        file,
+        [
+          '[Desktop Entry]',
+          'Type=Application',
+          'Name=LAN Share',
+          'Comment=Lets other devices on your network find this PC',
+          `Exec="${process.execPath}" --hidden`,
+          'Icon=lan-share',
+          'Terminal=false',
+          'X-GNOME-Autostart-enabled=true',
+          '',
+        ].join('\n'),
+      );
+    } else {
+      app.setLoginItemSettings({ openAtLogin: enabled, name: 'LAN Share', path: process.execPath, args: ['--hidden'] });
+    }
+  } catch (err) {
+    console.error('Could not change start at sign-in:', err);
+  }
+}
+
+/**
+ * Applies the choices made in the Windows installer (install-options.json next to the app):
+ * once per user, and again whenever the app is reinstalled.
+ */
+function applyInstallOptions(): void {
+  if (!app.isPackaged || profile) return;
+  const file = path.join(path.dirname(process.execPath), 'install-options.json');
+  let stamp: string;
+  try {
+    stamp = String(fs.statSync(file).mtimeMs);
+  } catch {
+    return; // Not installed by the Windows installer (Linux, RudramOS, portable).
+  }
+  const cfg = getConfig();
+  if (cfg.installOptionsApplied === stamp) return;
+  try {
+    const options = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (typeof options.askBeforeConnect === 'boolean') cfg.askBeforeConnect = options.askBeforeConnect;
+  } catch {
+    // Unreadable file: keep the current settings.
+  }
+  cfg.installOptionsApplied = stamp;
+  saveConfig();
+}
+
+// ---------- Accept / reject popup ----------
+
+const prompts = new Map<string, { request: ApprovalRequest; finish: (d: ApprovalDecision | 'timeout') => void }>();
+
+/** Shows a small always-on-top window asking whether a device may connect (even if LAN Share is in the tray). */
+function askApproval(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalDecision | 'timeout'> {
+  return new Promise((resolve) => {
+    const popup = new BrowserWindow({
+      width: 460,
+      height: 270,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      alwaysOnTop: true,
+      show: false,
+      title: 'LAN Share',
+      autoHideMenuBar: true,
+      backgroundColor: '#f5f6f8',
+      webPreferences: WEB_PREFERENCES,
+    });
+    let done = false;
+    const finish = (decision: ApprovalDecision | 'timeout') => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      prompts.delete(request.id);
+      if (!popup.isDestroyed()) popup.destroy();
+      resolve(decision);
+    };
+    const timer = setTimeout(() => finish('timeout'), APPROVAL_TIMEOUT_MS);
+    signal.addEventListener('abort', () => finish('timeout'), { once: true }); // The device gave up.
+    prompts.set(request.id, { request, finish });
+    popup.on('closed', () => finish('reject')); // Closing the popup counts as Reject.
+    popup.webContents.on('will-navigate', (e) => e.preventDefault());
+    popup.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    popup.once('ready-to-show', () => {
+      popup.show();
+      popup.focus();
+      popup.flashFrame(true);
+    });
+    popup.loadFile(path.join(STATIC, 'approval.html'), { query: { id: request.id } });
+  });
 }
 
 function info(): AppInfo {
@@ -145,9 +323,11 @@ async function applyServerState(): Promise<void> {
   if (!cfg.allowConnections && server.running) server.stop();
   discovery.sendHello();
   send('sessions', server.sessions.list());
+  send('info', info());
+  updateTray();
 }
 
-function createWindow(): void {
+function createWindow(show: boolean): void {
   win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -156,17 +336,26 @@ function createWindow(): void {
     title: 'LAN Share',
     backgroundColor: '#f5f6f8',
     autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
+    show,
+    webPreferences: WEB_PREFERENCES,
   });
-  win.loadFile(path.join(__dirname, '..', '..', 'static', 'index.html'));
+  win.loadFile(path.join(STATIC, 'index.html'));
   // This app never navigates or opens external windows.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Closing the window keeps LAN Share running in the tray, so other devices can still find this PC.
+  win.on('close', (e) => {
+    if (quitting || !getConfig().runInBackground || !tray) return;
+    e.preventDefault();
+    win?.hide();
+    if (!toldAboutTray && Notification.isSupported()) {
+      toldAboutTray = true;
+      new Notification({
+        title: 'LAN Share is still running',
+        body: 'Other devices can still find this PC. Use the LAN Share icon in the taskbar tray to open or quit it.',
+      }).show();
+    }
+  });
 }
 
 function registerIpc(): void {
@@ -187,9 +376,26 @@ function registerIpc(): void {
       path: f.path,
       readOnly: !!f.readOnly,
     }));
+    cfg.runInBackground = !!update.runInBackground;
+    cfg.askBeforeConnect = !!update.askBeforeConnect;
+    const loginChanged = cfg.startAtLogin !== !!update.startAtLogin;
+    cfg.startAtLogin = !!update.startAtLogin;
     saveConfig();
+    if (loginChanged) applyStartAtLogin();
     await applyServerState();
     return settings();
+  });
+
+  ipcMain.handle('forgetApprovedDevice', (_e, clientId: string) => {
+    const cfg = getConfig();
+    cfg.approvedDevices = cfg.approvedDevices.filter((d) => d.clientId !== clientId);
+    saveConfig();
+    return settings();
+  });
+
+  ipcMain.handle('approvalInfo', (_e, id: string) => prompts.get(id)?.request ?? null);
+  ipcMain.handle('approvalRespond', (_e, id: string, decision: ApprovalDecision) => {
+    if (decision === 'once' || decision === 'always' || decision === 'reject') prompts.get(id)?.finish(decision);
   });
 
   ipcMain.handle('setPassword', (_e, password: string) => {
@@ -259,6 +465,7 @@ function registerIpc(): void {
 
 app.whenReady().then(async () => {
   loadConfig();
+  applyInstallOptions();
 
   discovery = new Discovery(getConfig().deviceId, () => {
     const cfg = getConfig();
@@ -285,9 +492,13 @@ app.whenReady().then(async () => {
       new Notification({ title: 'LAN Share', body: `${name} (${ip}) connected to this PC` }).show();
     }
   });
+  server.approve = askApproval;
 
   registerIpc();
-  createWindow();
+  createTray();
+  // Started at sign-in: stay in the tray. Without a tray (rare Linux desktops) show the window.
+  createWindow(!startHidden || !tray);
+  applyStartAtLogin();
   checkNetwork();
   setInterval(checkNetwork, 10000);
   discovery.start();
@@ -298,12 +509,14 @@ app.whenReady().then(async () => {
   }
 });
 
+// Opening LAN Share again (Start menu, desktop icon) shows the window of the copy already running.
 app.on('second-instance', () => {
-  if (win) {
-    if (win.isMinimized()) win.restore();
-    win.focus();
-  }
+  if (app.isReady()) showWindow();
 });
 
-app.on('before-quit', () => discovery?.stop());
-app.on('window-all-closed', () => app.quit());
+app.on('before-quit', () => {
+  quitting = true;
+  discovery?.stop();
+});
+// Only reached when running in the background is off (otherwise the window just hides).
+app.on('window-all-closed', () => quit());

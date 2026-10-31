@@ -247,3 +247,4 @@ button, input { font: inherit; color: inherit; }
 .qr { width: 220px; height: 220px; image-rendering: pixelated; border-radius: 8px; background: #fff; padding: 6px; }
 .qr-url { font-family: Consolas, monospace; font-size: 15px; user-select: all; }
 .qr-select { padding: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+.hint.indent { margin: -6px 0 2px 26px; }

@@ -27,6 +27,22 @@ export interface StoredConfig {
   knownHosts: Record<string, string>;
   // Client side: remember-me tokens for other PCs, encrypted with Windows DPAPI via safeStorage.
   savedLogins: Record<string, string>;
+  // Closing the window hides LAN Share to the tray; sharing and discovery keep running.
+  runInBackground: boolean;
+  // Start (hidden, in the tray) when the user signs in, so other devices can find this PC.
+  startAtLogin: boolean;
+  // After the right password, ask on this PC (Allow / Reject) before a new device gets in.
+  askBeforeConnect: boolean;
+  // Devices allowed with "Always allow": they skip the question (still need the password).
+  approvedDevices: ApprovedDevice[];
+  // Which installer choices (install-options.json, by its timestamp) were applied to these settings.
+  installOptionsApplied?: string;
+}
+
+export interface ApprovedDevice {
+  clientId: string;
+  clientName: string;
+  approvedAt: number;
 }
 
 let configPath = '';
@@ -41,6 +57,10 @@ function defaults(): StoredConfig {
     rememberedClients: [],
     knownHosts: {},
     savedLogins: {},
+    runInBackground: true,
+    startAtLogin: true,
+    askBeforeConnect: true,
+    approvedDevices: [],
   };
 }
 

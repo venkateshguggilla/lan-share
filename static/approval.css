@@ -1,0 +1,10 @@
+/* Accept / reject popup (approval.html); colours come from styles.css. */
+html, body.approval { overflow: hidden; }
+body.approval main { padding: 20px 22px 14px; display: flex; flex-direction: column; gap: 12px; }
+.approval .who { display: flex; align-items: center; gap: 14px; }
+.approval .logo { width: 44px; height: 44px; border-radius: 11px; flex-shrink: 0; }
+.approval h1 { margin: 0; font-size: 17px; line-height: 1.3; word-break: break-word; }
+.approval .lead { margin: 0; color: var(--text-2); line-height: 1.45; }
+.approval .actions { display: flex; gap: 8px; margin-top: 4px; }
+.approval .spacer { flex: 1; }
+.approval .countdown { text-align: right; }

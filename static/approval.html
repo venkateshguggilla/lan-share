@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'">
+  <title>LAN Share</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="approval.css">
+</head>
+<body class="approval">
+  <main>
+    <div class="who">
+      <img src="mobile/icon.png" alt="" class="logo">
+      <div>
+        <h1 id="title">A device wants to connect</h1>
+        <div id="detail" class="hint"></div>
+      </div>
+    </div>
+    <p class="lead" id="explain">It entered this PC's LAN Share password. Allow it to see your shared folders?</p>
+    <div class="actions">
+      <button id="reject" class="btn">Reject</button>
+      <span class="spacer"></span>
+      <button id="once" class="btn">Allow once</button>
+      <button id="always" class="btn primary">Always allow</button>
+    </div>
+    <div id="countdown" class="hint countdown"></div>
+  </main>
+  <script src="approval.js"></script>
+</body>
+</html>
